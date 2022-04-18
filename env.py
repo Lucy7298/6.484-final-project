@@ -9,12 +9,13 @@ class Hopper(HopperBulletEnv):
   foot_collision_cost = -1.0  # touches another leg, or other objects, that cost makes robot avoid smashing feet into itself
   foot_ground_object_names = set(["floor"])  # to distinguish ground and other objects
   joints_at_limit_cost = -0.1  # discourage stuck joints
-  strain_cost = -0.1
-  def __init__(self, enable_torque, predict_val, render=False, episode_steps=1000):
+  strain_cost = -0.0001
+  def __init__(self, enable_torque, predict_val, add_additional=True, render=False, episode_steps=1000):
     """Modifies `__init__` in `HopperBulletEnv` parent class."""
     self.episode_steps = episode_steps
     self.enable_torque = enable_torque
     self.predict_val = predict_val # either "electricity" or "strain" or "none"
+    self.add_additional = add_additional
     super().__init__(render=render)
 
     self.torque_enabled = False
@@ -100,9 +101,13 @@ class Hopper(HopperBulletEnv):
     else: 
         additional_reward = [electricity_cost]
     
-    self.rewards = base_rewards + additional_reward
+    if self.add_additional: 
+        self.rewards = base_rewards + additional_reward
+    else: 
+        self.rewards = base_rewards
 
     self.HUD(state, a, done)
+    #print(self.rewards)
     self.reward += sum(self.rewards)
 
     if self.predict_val: 
