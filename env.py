@@ -123,12 +123,12 @@ class Hopper(HopperBulletEnv):
     if self.predict_val:
         current_predict_vals = []
         if "electricity" in self.predict_val:
-            current_predict_vals.append((electricity_surprise_weight, electricity_cost))
+            current_predict_vals.append((self.electricity_surprise_weight, electricity_cost))
         if "strain" in self.predict_val:
-            current_predict_vals.append((strain_surprise_weight, sum_strain))
+            current_predict_vals.append((self.strain_surprise_weight, sum_strain))
         for i, current_val_info in enumerate(current_predict_vals):
             surprise_penalty_weight, current_val = current_val_info
-            self.ensemble_training_datas[i].append((old_state, a, predict_val))
+            self.ensemble_training_datas[i].append((old_state, a, current_val))
 
             if len(self.ensemble_training_datas[i]) == 1000:
             #print('Training deep normal models, 1000 steps passed')
