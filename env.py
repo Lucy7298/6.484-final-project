@@ -10,6 +10,7 @@ class Hopper(HopperBulletEnv):
   foot_ground_object_names = set(["floor"])  # to distinguish ground and other objects
   joints_at_limit_cost = -0.1  # discourage stuck joints
   strain_cost = -0.0001
+  surprise_coeff = 0.5
   def __init__(self, enable_torque, predict_val, add_additional=True, render=False, episode_steps=1000):
     """Modifies `__init__` in `HopperBulletEnv` parent class."""
     self.episode_steps = episode_steps
@@ -139,6 +140,6 @@ class Hopper(HopperBulletEnv):
 
             penalty_based_surprise_reward = a_lambdaprime*(neg_log_likelihood - electricity_cost)
             assert(isinstance(self.reward, float))
-            self.reward += 0.5*penalty_based_surprise_reward
+            self.reward += self.surprise_coeff*penalty_based_surprise_reward
 
     return state, sum(self.rewards), bool(done), {}
