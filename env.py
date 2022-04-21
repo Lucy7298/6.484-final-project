@@ -10,11 +10,14 @@ class Hopper(HopperBulletEnv):
   foot_ground_object_names = set(["floor"])  # to distinguish ground and other objects
   joints_at_limit_cost = -0.1  # discourage stuck joints
   strain_cost = -0.0001
+  electricity_surprise_weight = 1
+  strain_surprise_weight = 1
+  
   def __init__(self, enable_torque, predict_val, add_additional=True, render=False, episode_steps=1000):
     """Modifies `__init__` in `HopperBulletEnv` parent class."""
     self.episode_steps = episode_steps
     self.enable_torque = enable_torque
-    self.predict_val = predict_val # either "electricity" or "strain" or "none"
+    self.predict_val = predict_val # either "electricity" or "strain" or "electricity_strain" or ""
     self.add_additional = add_additional
     super().__init__(render=render)
 
@@ -23,8 +26,14 @@ class Hopper(HopperBulletEnv):
   def reset(self):
     """Modifies `reset` in `WalkerBaseBulletEnv` base class."""
     self.step_counter = 0
-    self.ensemble_training_data = []
-    self.penalty_ensemble = [LearnHopperPenalty(seed=idx) for idx in range(5)] #DeepNormal models go here
+    self.ensemble_training_datas = []
+    self.penalty_ensembles = []
+    if "electricity" in self.predict_val:
+      self.ensemble_training_datas.append([])
+      self.penalty_ensembles.append([LearnHopperPenalty(seed=idx) for idx in range(5)] #DeepNormal models go here)
+    if "strain" in self.predict_val:
+      self.ensemble_training_datas.append([])
+      self.penalty_ensembles.append([LearnHopperPenalty(seed=idx) for idx in range(5, 10)] #DeepNormal models go here)
     ret_val = super().reset()
 
     if self.enable_torque and not self.torque_enabled: 
@@ -108,37 +117,40 @@ class Hopper(HopperBulletEnv):
 
     self.HUD(state, a, done)
     #print(self.rewards)
-    self.reward += sum(self.rewards)
+    self.reward += sum(base_rewards)
+    
+    total_reward = sum(self.rewards)
+    if self.predict_val:
+        current_predict_vals = []
+        if "electricity" in self.predict_val:
+            current_predict_vals.append((electricity_surprise_weight, electricity_cost))
+        if "strain" in self.predict_val:
+            current_predict_vals.append((strain_surprise_weight, sum_strain))
+        for i, current_val_info in enumerate(current_predict_vals):
+            surprise_penalty_weight, current_val = current_val_info
+            self.ensemble_training_datas[i].append((old_state, a, predict_val))
 
-    if self.predict_val: 
-        if self.predict_val == 'electricity': 
-            predict_val = electricity_cost
-        elif self.predict_val == 'strain': 
-            predict_val = sum_strain
+            if len(self.ensemble_training_datas[i]) == 1000:
+            #print('Training deep normal models, 1000 steps passed')
+                for penalty_model in self.penalty_ensembles[i]:
+                    penalty_model.train(self.ensemble_training_datas[i])
+                self.ensemble_training_datas[i] = []
+            if self.step_counter % 50000 == 0:
+                print(str(self.step_counter) + " steps passed")
 
-        self.ensemble_training_data.append((old_state, a, predict_val))
+            if self.step_counter > 20000 and current_val < 0:
+            #Getting ensemble prediction, lambda_1' and lambda_2' are both set to 2 (a default value the paper gives), but this is adjustable
+                lambda1prime = 2
+                lambda2prime = 2
+                a_lambdaprime = 1/(1 + np.exp(lambda1prime*(current_val - lambda2prime)))
 
-        if len(self.ensemble_training_data) == 1000:
-        #print('Training deep normal models, 1000 steps passed')
-            for penalty_model in self.penalty_ensemble:
-                penalty_model.train(self.ensemble_training_data)
-            self.ensemble_training_data = []
-        if self.step_counter % 50000 == 0:
-            print(str(self.step_counter) + " steps passed")
+                predicted_dists = [model(torch.cat((torch.from_numpy(old_state), torch.from_numpy(a))).float()) for model in self.penalty_ensembles[i]]
+                predicted_dists_mean = torch.mean([dist.mean for dist in predicted_dists], 0)
+                predicted_dists_var = torch.mean([dist.variance + torch.square(dist.mean) for dist in predicted_dists], 0) - torch.square(predicted_dists_mean)
+                neg_log_likelihood = -torch.normal(mean=predicted_dists_mean, std=torch.sqrt(predicted_dists_var)).log_prob(current_val)
 
-        if self.step_counter > 20000 and electricity_cost < 0:
-        #Getting ensemble prediction, lambda_1' and lambda_2' are both set to 2 (a default value the paper gives), but this is adjustable
-            lambda1prime = 2
-            lambda2prime = 2
-            a_lambdaprime = 1/(1 + np.exp(lambda1prime*(electricity_cost - lambda2prime)))
+                penalty_based_surprise_reward = a_lambdaprime*(neg_log_likelihood - current_val)
+                assert(isinstance(total_reward, float))
+                total_reward += penalty_based_surprise_reward*surprise_penalty_weight
 
-            predicted_dists = [model(torch.cat((torch.from_numpy(old_state), torch.from_numpy(a))).float()) for model in self.penalty_ensemble]
-            predicted_dists_mean = torch.mean([dist.mean for dist in predicted_dists], 0)
-            predicted_dists_var = torch.mean([dist.variance + torch.square(dist.mean) for dist in predicted_dists], 0) - torch.square(predicted_dists_mean)
-            neg_log_likelihood = -torch.normal(mean=predicted_dists_mean, std=torch.sqrt(predicted_dists_var)).log_prob(electricity_cost)
-
-            penalty_based_surprise_reward = a_lambdaprime*(neg_log_likelihood - electricity_cost)
-            assert(isinstance(self.reward, float))
-            self.reward += 0.5*penalty_based_surprise_reward
-
-    return state, sum(self.rewards), bool(done), {}
+    return state, total_reward, bool(done), {}
