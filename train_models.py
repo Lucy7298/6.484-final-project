@@ -104,7 +104,7 @@ def make_video(path_to_ckpt, save_path):
     n_steps = 200
 
     frames = []
-    env = Hopper(enable_torque=False, predict_val=False, add_additional=False, render=True)
+    env = Hopper(enable_torque=False, predict_val=False, add_additional=False)
     #env = Monitor(env, "debug_log")
 
     agent = DDPG.load(path_to_ckpt)
@@ -128,12 +128,13 @@ def make_video(path_to_ckpt, save_path):
 
 
 
-#plot_figure("/Users/yunxingl/Documents/6.484/final_project/log/strain_True_6fe5fd7b-b4a6-11ec-8b49-0894ef80999b", 500000, "strain.png")
-# make_video("/Users/yunxingl/Documents/6.484/final_project/ckpt/strain_True_6fe5fd7b-b4a6-11ec-8b49-0894ef80999b_500000_steps.zip", 
-#            "animations/first_animation.gif", train_timesteps=2 )
+# plot_figure("/nobackup/users/yunxingl/log/strain_True_0f9b994c-bec2-11ec-b6eb-0894ef8099d1", 900000, "graphs/strain_no_energy_reward_half_surprise.png")
+# make_video("/nobackup/users/yunxingl/ckpt/strain_True_0f9b994c-bec2-11ec-b6eb-0894ef8099d1_900000_steps.zip", 
+#            "animations/strain_no_energy_reward_half_surprise.gif" )
 train_model(predict_val='strain',
                 train_timesteps=1000000, 
                 enable_torque=True, 
                 add_additional=True,
                 env_overrides={"electricity_cost": 0, 
-                               "stall_torque_cost": 0})
+                               "stall_torque_cost": 0, 
+                               "surprise_coeff": 1})
