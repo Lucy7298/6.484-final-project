@@ -98,22 +98,25 @@ class Hopper(HopperBulletEnv):
             joints_at_limit_cost = float(self.joints_at_limit_cost * self.robot.joints_at_limit)
             rewards["j_limit_cost"] = joints_at_limit_cost
 
-        if self.use_strain_cost: 
+        if self.use_strain_cost or self.use_strain_surprise: 
             sum_strain = 0
             for joint in self.ordered_joints: 
                 _, _, forces, _ = joint._p.getJointState(joint.bodies[joint.bodyIndex], joint.jointIndex)
                 # sum of moments 
                 sum_strain += np.linalg.norm( np.array(forces[3:]))
+            
+            strain_cost = 0
             if self.use_cost_diff: 
                 if "strain" in self.prev_state_memory: 
                     strain_cost =  self.strain_cost * (sum_strain  - self.prev_state_memory["strain"])
                 self.prev_state_memory["strain"] = sum_strain
             else: 
                 strain_cost = self.strain_cost * sum_strain
+            
+            if self.use_strain_cost: 
+                rewards["strain_cost"] = strain_cost
 
-            rewards["strain_cost"] = strain_cost
-
-        if self.use_electricity_cost: 
+        if self.use_electricity_cost or self.use_electricity_surprise: 
              # let's assume we have DC motor with controller, and reverse current braking
             electricity_use = float(np.abs(a * self.robot.joint_speeds).mean())
             electricity_cost = 0
@@ -123,7 +126,9 @@ class Hopper(HopperBulletEnv):
                 self.prev_state_memory["electricity"] = electricity_use 
             else: 
                 electricity_cost = self.electricity_cost * electricity_use
-            rewards["electricity_cost"] = electricity_cost
+            
+            if self.use_electricity_cost: 
+                rewards["electricity_cost"] = electricity_cost
 
         if self.use_torque_cost: 
             total_torque = float(np.square(a).mean())

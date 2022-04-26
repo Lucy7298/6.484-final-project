@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH -c 10
-#SBATCH -a 0-4
+#SBATCH -a 10-31
 #SBATCH --time=12:00:00
 #SBATCH --output=/nobackup/users/yunxingl/models/experiment_1/slurm_logs/debug-%a.log
 
 e_cost=("" "--use_electricity_cost --use_torque_cost")
-d_cost=("" "--use_cost_diff")
+d_cost=("--torque_cost -0.1" "--use_cost_diff") #use default parameters if you don't use cost diff
 s_cost=("" "--use_strain_cost")
 e_surprise=("" "--use_electricity_surprise")
 s_surprise=("" "--use_strain_surprise")

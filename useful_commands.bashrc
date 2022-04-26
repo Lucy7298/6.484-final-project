@@ -1,9 +1,7 @@
 MODEL_LOG_DIR='/nobackup/users/yunxingl/models'
 
 make_exp_dir () {
-    local  __dirname=$1
-
-    dirpath="$MODEL_LOG_DIR/$__dirname"
+    dirpath=$1
     #logpath="$TRAINING_LOG_DIR/$__dirname"
 
     if [ -d "$dirpath" ]; then
