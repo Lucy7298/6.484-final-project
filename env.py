@@ -6,7 +6,7 @@ from collections import namedtuple
 
 class Hopper(HopperBulletEnv):
     electricity_cost = -0.001  # cost for using motors -- this parameter should be carefully tuned against reward for making progress, other values less improtant
-    stall_torque_cost = -0.1  # cost for running electric current through a motor even at zero rotational speed, small
+    torque_cost = -1  # cost for running electric current through a motor even at zero rotational speed, small
     joints_at_limit_cost = -0.1  # discourage stuck joints
     strain_cost = -0.0001
     electricity_surprise_weight = 1
@@ -20,21 +20,27 @@ class Hopper(HopperBulletEnv):
     def __init__(self, 
                  use_progress_reward, 
                  use_electricity_cost, 
+                 use_torque_cost, 
                  use_limits_cost, 
                  use_strain_cost, 
                  use_electricity_surprise, 
                  use_strain_surprise, 
+                 use_cost_diff,
                  render=False, 
-                 episode_steps=1000):
+                 episode_steps=1000, 
+                 debug=False):
         """Modifies `__init__` in `HopperBulletEnv` parent class."""
         self.episode_steps = episode_steps
         self.use_progress_reward = use_progress_reward
         self.use_electricity_cost = use_electricity_cost
+        self.use_torque_cost = use_torque_cost 
         self.use_limit_cost = use_limits_cost
         self.use_strain_cost = use_strain_cost
         self.use_electricity_surprise = use_electricity_surprise
         self.use_strain_surprise = use_strain_surprise
+        self.use_cost_diff = use_cost_diff
         self.prev_state_memory = {}
+        self.debug = debug
 
         super().__init__(render=render)
 
@@ -72,12 +78,10 @@ class Hopper(HopperBulletEnv):
             or super()._isDone())
 
     def compute_reward(self, old_state, a, state): 
-        total_reward = 0
+        rewards = {}
 
         if self.use_progress_reward: 
             # state[0] is body height above ground, body_rpy[1] is pitch
-            self._alive = float(self.robot.alive_bonus(state[0] + self.robot.initial_z,
-                                                    self.robot.body_rpy[1]))
             done = self._isDone()
             if not np.isfinite(state).all():
                 print("~INF~", state)
@@ -87,12 +91,12 @@ class Hopper(HopperBulletEnv):
             self.potential = self.robot.calc_potential()
             progress = float(self.potential - potential_old)
 
-            total_reward += self._alive
-            total_reward += progress
+            rewards["alive"] = self._alive
+            rewards["progress"] = progress
 
         if self.use_limit_cost: 
             joints_at_limit_cost = float(self.joints_at_limit_cost * self.robot.joints_at_limit)
-            total_reward += joints_at_limit_cost
+            rewards["j_limit_cost"] = joints_at_limit_cost
 
         if self.use_strain_cost: 
             sum_strain = 0
@@ -100,16 +104,37 @@ class Hopper(HopperBulletEnv):
                 _, _, forces, _ = joint._p.getJointState(joint.bodies[joint.bodyIndex], joint.jointIndex)
                 # sum of moments 
                 sum_strain += np.linalg.norm( np.array(forces[3:]))
-            if "strain" in self.prev_state_memory: 
-                strain_cost =  self.strain_cost * (sum_strain  - self.prev_state_memory["strain"])
-                total_reward += strain_cost
-            self.prev_state_memory["strain"] = sum_strain
+            if self.use_cost_diff: 
+                if "strain" in self.prev_state_memory: 
+                    strain_cost =  self.strain_cost * (sum_strain  - self.prev_state_memory["strain"])
+                self.prev_state_memory["strain"] = sum_strain
+            else: 
+                strain_cost = self.strain_cost * sum_strain
+
+            rewards["strain_cost"] = strain_cost
 
         if self.use_electricity_cost: 
-            electricity_cost = self.electricity_cost * float(np.abs(a * self.robot.joint_speeds).mean(
-                ))  # let's assume we have DC motor with controller, and reverse current braking
-            electricity_cost += self.stall_torque_cost * float(np.square(a).mean())
-            total_reward += electricity_cost
+             # let's assume we have DC motor with controller, and reverse current braking
+            electricity_use = float(np.abs(a * self.robot.joint_speeds).mean())
+            electricity_cost = 0
+            if self.use_cost_diff: 
+                if "electricity" in self.prev_state_memory: 
+                    electricity_cost = self.electricity_cost * (electricity_use - self.prev_state_memory["electricity"])
+                self.prev_state_memory["electricity"] = electricity_use 
+            else: 
+                electricity_cost = self.electricity_cost * electricity_use
+            rewards["electricity_cost"] = electricity_cost
+
+        if self.use_torque_cost: 
+            total_torque = float(np.square(a).mean())
+            torque_cost = 0 
+            if self.use_cost_diff: 
+                if "torque" in self.prev_state_memory: 
+                    torque_cost = self.torque_cost * (total_torque - self.prev_state_memory["torque"])
+                self.prev_state_memory["torque"] = total_torque 
+            else: 
+                torque_cost = self.torque_cost * total_torque 
+            rewards["torque_cost"] = torque_cost 
 
 
         self.HUD(state, a, done)
@@ -118,12 +143,16 @@ class Hopper(HopperBulletEnv):
             current_predict_vals = []
 
             if self.use_electricity_surprise:
-                current_predict_vals.append((self.electricity_surprise_weight, electricity_cost))
+                current_predict_vals.append((self.electricity_surprise_weight, \
+                                             electricity_cost, \
+                                             "electricity_surprise"))
             if self.use_strain_surprise:
-                current_predict_vals.append((self.strain_surprise_weight, sum_strain))
+                current_predict_vals.append((self.strain_surprise_weight, \
+                                             strain_cost, \
+                                             "strain_surprise"))
 
             for i, current_val_info in enumerate(current_predict_vals):
-                surprise_penalty_weight, current_val = current_val_info
+                surprise_penalty_weight, current_val, name = current_val_info
                 self.ensemble_training_datas[i].append((old_state, a, current_val))
 
                 if len(self.ensemble_training_datas[i]) == 1000:
@@ -144,11 +173,15 @@ class Hopper(HopperBulletEnv):
                     neg_log_likelihood = -torch.normal(mean=predicted_dists_mean, std=torch.sqrt(predicted_dists_var)).log_prob(current_val)
 
                     penalty_based_surprise_reward = a_lambdaprime*(neg_log_likelihood) + (1 - a_lambdaprime)*current_val
-                    assert(isinstance(total_reward, float))
-                    total_reward += penalty_based_surprise_reward*surprise_penalty_weight
-                
-        self.reward = total_reward
-        return total_reward 
+                    rewards[name] = penalty_based_surprise_reward*surprise_penalty_weight
+
+        if self.debug: 
+            print(rewards)
+
+        self.reward = sum(rewards.values())
+
+        assert isinstance(self.reward, float)
+        return self.reward 
 
     def step(self, a):
         """Fully overrides `step` in `WalkerBaseBulletEnv` base class."""
@@ -164,7 +197,8 @@ class Hopper(HopperBulletEnv):
             self.scene.global_step()
 
         state = self.robot.calc_state()  # also calculates self.joints_at_limit
-
+        self._alive = float(self.robot.alive_bonus(state[0] + self.robot.initial_z,
+                                                self.robot.body_rpy[1]))
         done = self._isDone()
         if not np.isfinite(state).all():
             print("~INF~", state)
