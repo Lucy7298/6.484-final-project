@@ -1,3 +1,4 @@
+from math import perm
 import torch 
 from torch import nn
 import random 
@@ -68,7 +69,8 @@ class LearnHopperPenalty:
 
     def train(self, step_info):
         #Just doing SGD for now
-        permuted_step_info = np.random.permutation(step_info)
+        permutation_idxes = np.random.permutation(len(step_info))
+        permuted_step_info = [step_info[i] for i in permutation_idxes]
         states_before = [step[0] for step in permuted_step_info]
         actions = [step[1] for step in permuted_step_info]
         electricity_costs = [step[2] for step in permuted_step_info]
