@@ -26,6 +26,7 @@ class Hopper(HopperBulletEnv):
                  use_electricity_surprise, 
                  use_strain_surprise, 
                  use_cost_diff,
+                 eval_mode=False,
                  render=False, 
                  episode_steps=1000, 
                  debug=False):
@@ -41,6 +42,7 @@ class Hopper(HopperBulletEnv):
         self.use_cost_diff = use_cost_diff
         self.prev_state_memory = {}
         self.debug = debug
+        self.eval_mode = eval_mode
 
         super().__init__(render=render)
 
@@ -62,7 +64,7 @@ class Hopper(HopperBulletEnv):
         ret_val = super().reset()
 
         enable_torque = self.use_strain_cost or self.use_strain_surprise
-        if enable_torque and not self.torque_enabled: 
+        if (enable_torque or self.eval_mode) and not self.torque_enabled: 
             for joint in self.ordered_joints: 
                 joint._p.enableJointForceTorqueSensor(joint.bodies[joint.bodyIndex], 
                                                   joint.jointIndex, 
@@ -76,6 +78,17 @@ class Hopper(HopperBulletEnv):
         """Modifies `_isDone` in `WalkerBaseBulletEnv` base class."""
         return (self.step_counter == self.episode_steps
             or super()._isDone())
+
+    def compute_electricity_use(self, a): 
+        return float(np.abs(a * self.robot.joint_speeds).mean())
+    
+    def compute_sum_strain(self): 
+        sum_strain = 0
+        for joint in self.ordered_joints: 
+            _, _, forces, _ = joint._p.getJointState(joint.bodies[joint.bodyIndex], joint.jointIndex)
+            # sum of moments 
+            sum_strain += np.linalg.norm( np.array(forces[3:]))
+        return sum_strain
 
     def compute_reward(self, old_state, a, state): 
         rewards = {}
@@ -99,11 +112,7 @@ class Hopper(HopperBulletEnv):
             rewards["j_limit_cost"] = joints_at_limit_cost
 
         if self.use_strain_cost or self.use_strain_surprise: 
-            sum_strain = 0
-            for joint in self.ordered_joints: 
-                _, _, forces, _ = joint._p.getJointState(joint.bodies[joint.bodyIndex], joint.jointIndex)
-                # sum of moments 
-                sum_strain += np.linalg.norm( np.array(forces[3:]))
+            sum_strain = self.compute_sum_strain()
             
             strain_cost = 0
             if self.use_cost_diff: 
@@ -118,7 +127,7 @@ class Hopper(HopperBulletEnv):
 
         if self.use_electricity_cost or self.use_electricity_surprise: 
              # let's assume we have DC motor with controller, and reverse current braking
-            electricity_use = float(np.abs(a * self.robot.joint_speeds).mean())
+            electricity_use = self.compute_electricity_use(a)
             electricity_cost = 0
             if self.use_cost_diff: 
                 if "electricity" in self.prev_state_memory: 
@@ -184,9 +193,18 @@ class Hopper(HopperBulletEnv):
             print(rewards)
 
         self.reward = sum(rewards.values())
+        self.all_rewards = rewards
 
         assert isinstance(self.reward, float)
         return self.reward 
+
+    def evaluate(self, old_state, a, new_state):
+        electricity_use = self.compute_electricity_use(a)
+        total_applied_torque = float(np.square(a).mean())
+        sum_strain = self.compute_sum_strain()
+        return {"eval_electricity": electricity_use, 
+                "eval_torque": total_applied_torque, 
+                "eval_strain": sum_strain}
 
     def step(self, a):
         """Fully overrides `step` in `WalkerBaseBulletEnv` base class."""
@@ -209,5 +227,11 @@ class Hopper(HopperBulletEnv):
             print("~INF~", state)
             done = True
 
+        data = {}
+
         total_reward = self.compute_reward(old_state, a, state)
-        return state, total_reward, bool(done), {}
+        if self.debug: 
+            data.update(self.all_rewards)
+        if self.eval_mode: 
+            data.update(self.evaluate(old_state, a, state))
+        return state, total_reward, bool(done), data

@@ -12,12 +12,12 @@ import matplotlib
 import matplotlib.animation as animation
 from IPython.display import HTML
 import imageio
+from PIL import Image, ImageDraw, ImageFont  
 
 from env import Hopper
 import numpy as np 
-import json 
 import os 
-
+import json 
 import matplotlib.pyplot as plt
 import argparse 
 import uuid
@@ -25,6 +25,7 @@ import yaml
 import inspect
 import torch
 from pathlib import Path
+from pprint import pprint
 
 from argparse import ArgumentParser
 import json
@@ -38,9 +39,7 @@ ENV_PARAM_NAMES = ['electricity_cost',
                    'lambda1_prime',
                    'lambda2_prime']
 
-def train_model(args): 
-    ##SET UP ENV
-    print("torch available", torch.cuda.is_available())
+def initialize_env(args): 
     env = Hopper(args.use_progress_reward, 
                  args.use_electricity_cost, 
                  args.use_torque_cost, 
@@ -49,13 +48,19 @@ def train_model(args):
                  args.use_electricity_surprise, 
                  args.use_strain_surprise, 
                  args.use_cost_diff, 
+                 eval_mode=args.eval_mode, 
                  debug=args.debug)
 
     argsdict = vars(args)
     for field_name in ENV_PARAM_NAMES: 
         setattr(env, field_name, argsdict[field_name])
         print(field_name, getattr(env, field_name))
+    return env 
 
+def train_model(args): 
+    ##SET UP ENV
+    print("torch available", torch.cuda.is_available())
+    env = initialize_env(args)
     ##SET UP CHECKPOINTING AND LOGGING
 
     output_dir = Path(args.output_dir)
@@ -71,7 +76,7 @@ def train_model(args):
 
     env = Monitor(env, str(log_dir))
     with open(str(config_path), 'wt') as f: 
-        json.dump(argsdict, f)
+        json.dump(vars(args), f)
 
     # the noise objects for DDPG
     n_actions = 3
@@ -81,64 +86,6 @@ def train_model(args):
     checkpoint_callback = CheckpointCallback(save_freq=100000, save_path=str(checkpoint_dir))
     model = DDPG("MlpPolicy", env, action_noise=action_noise)#, verbose=1)
     model.learn(total_timesteps=args.training_timesteps, log_interval=100, callback=checkpoint_callback)
-
-def display_video(frames, framerate=30):
-  """Generates video from `frames`.
-
-  Args:
-    frames (ndarray): Array of shape (n_frames, height, width, 3).
-    framerate (int): Frame rate in units of Hz.
-
-  Returns:
-    Display object.
-  """
-  height, width, _ = frames[0].shape
-  dpi = 70
-  orig_backend = matplotlib.get_backend()
-  matplotlib.use('Agg')  # Switch to headless 'Agg' to inhibit figure rendering.
-  fig, ax = plt.subplots(1, 1, figsize=(width / dpi, height / dpi), dpi=dpi)
-  matplotlib.use(orig_backend)  # Switch back to the original backend.
-  ax.set_axis_off()
-  ax.set_aspect('equal')
-  ax.set_position([0, 0, 1, 1])
-  im = ax.imshow(frames[0])
-  def update(frame):
-    im.set_data(frame)
-    return [im]
-  interval = 1000/framerate
-  anim = animation.FuncAnimation(fig=fig, func=update, frames=frames,
-                                  interval=interval, blit=True, repeat=False)
-  return HTML(anim.to_html5_video())
-
-def plot_figure(log_dir, train_timesteps, save_file): 
-    plot_results([log_dir], train_timesteps, results_plotter.X_TIMESTEPS, "Hopper")
-    plt.savefig(save_file)
-
-def make_video(path_to_ckpt, save_path): 
-    n_steps = 200
-
-    frames = []
-    env = Hopper(enable_torque=False, predict_val="", add_additional=False)
-    #env = Monitor(env, "debug_log")
-
-    agent = DDPG.load(path_to_ckpt)
-    frames = []  # Frames for video.
-    rewards = [[]]  # Reward at every timestep.
-    timestep = env.reset().astype(float)
-    for _ in range(n_steps):
-        frames.append(env.render(mode='rgb_array').copy())
-        action, _ = agent.predict(timestep)
-        timestep, reward, done, _ = env.step(action)
-
-    # `timestep.reward` is None when episode terminates.
-    if not done:
-        # Old episode continues.
-        rewards[-1].append(reward)
-    else:
-        # New episode begins.
-        rewards.append([])
-
-    imageio.mimsave(save_path, [np.array(img) for i, img in enumerate(frames) if i%2 == 0], fps=29)
 
 
 if __name__ == '__main__': 
@@ -166,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('--lambda2_prime', type=float, default=2, required=False)
 
     parser.add_argument('--training_timesteps', type=int, default=1000000, required=False)
+    parser.add_argument('--eval_mode', action='store_true') # this should never be set
     parser.add_argument('--debug', action='store_true')
 
     args = parser.parse_args()
