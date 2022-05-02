@@ -84,14 +84,15 @@ if __name__ == '__main__':
     data_dir = Path('/nobackup/users/yunxingl/models/experiment_1') 
     for directory in data_dir.iterdir(): 
         if directory.is_dir() and directory.name != 'slurm_logs': 
-            video_output = str((directory / "900000_animation.mp4"))
-            data_output = str((directory / "evaluation_metrics.pkl"))
-            ckpt_path = str((directory / 'checkpoint' / "rl_model_900000_steps.zip"))
-            debug_config = str((directory / "config.json"))
-            make_video(ckpt_path, video_output, data_output, debug_config)
-            print(directory)
-    
-            log_dir = directory / "log"
-            plot_figure(log_dir, 900000, directory / "final_graph.png")
-            
-            gc.collect()
+            for i in range(4): 
+                video_output = str((directory / f"900000_animation_{i}.mp4"))
+                data_output = str((directory / f"evaluation_metrics_{i}.csv"))
+                ckpt_path = str((directory / 'checkpoint' / "rl_model_900000_steps.zip"))
+                debug_config = str((directory / "config.json"))
+                make_video(ckpt_path, video_output, data_output, debug_config)
+                print(directory)
+        
+                log_dir = directory / "log"
+                plot_figure(log_dir, 900000, directory / "final_graph.png")
+                
+                gc.collect()
