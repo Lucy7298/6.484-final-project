@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH -c 10
-#SBATCH -a 10-31
+#SBATCH -a 3,4,6,17,30
 #SBATCH --time=12:00:00
-#SBATCH --output=/nobackup/users/yunxingl/models/experiment_1/slurm_logs/debug-%a.log
+#SBATCH --output=/nobackup/users/yunxingl/models/sac_exp/slurm_logs/debug-%a.log
 
 e_cost=("" "--use_electricity_cost --use_torque_cost")
 d_cost=("--torque_cost -0.1" "--use_cost_diff") #use default parameters if you don't use cost diff
@@ -32,10 +32,11 @@ do
                 echo $s_flag
                 echo $e_s_flag
                 echo $s_s_flag
-                output_dir=/nobackup/users/yunxingl/models/experiment_1/$SLURM_ARRAY_TASK_ID
+                output_dir=/nobackup/users/yunxingl/models/sac_exp/$SLURM_ARRAY_TASK_ID
                 python3 train_models.py \
                         --output_dir $output_dir \
                         --use_progress_reward \
+                        --train_type SAC \
                         $e_flag \
                         --use_limits_cost \
                         $d_flag \

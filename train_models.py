@@ -4,7 +4,7 @@ from stable_baselines3.common import results_plotter
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.results_plotter import load_results, ts2xy, plot_results
 from stable_baselines3.common.noise import NormalActionNoise, OrnsteinUhlenbeckActionNoise
-from stable_baselines3 import DDPG
+from stable_baselines3 import DDPG, SAC, TD3
 import matplotlib.pyplot as plt
 from stable_baselines3.common import results_plotter
 from stable_baselines3.common.results_plotter import load_results, ts2xy, plot_results
@@ -38,6 +38,12 @@ ENV_PARAM_NAMES = ['electricity_cost',
                    'strain_surprise_weight',
                    'lambda1_prime',
                    'lambda2_prime']
+
+TRAINERS = {
+    "SAC": SAC, 
+    "TD3": TD3, 
+    "DDPG": DDPG
+}
 
 def initialize_env(args): 
     env = Hopper(args.use_progress_reward, 
@@ -84,7 +90,9 @@ def train_model(args):
 
     # Save a checkpoint every 20000 steps
     checkpoint_callback = CheckpointCallback(save_freq=100000, save_path=str(checkpoint_dir))
-    model = DDPG("MlpPolicy", env, action_noise=action_noise)#, verbose=1)
+
+    mclass = TRAINERS[args.train_type]
+    model = mclass("MlpPolicy", env, action_noise=action_noise)#, verbose=1)
     model.learn(total_timesteps=args.training_timesteps, log_interval=100, callback=checkpoint_callback)
 
 
@@ -113,6 +121,7 @@ if __name__ == '__main__':
     parser.add_argument('--lambda2_prime', type=float, default=2, required=False)
 
     parser.add_argument('--training_timesteps', type=int, default=1000000, required=False)
+    parser.add_argument('--train_type', default='DDPG', required=False)
     parser.add_argument('--eval_mode', action='store_true') # this should never be set
     parser.add_argument('--debug', action='store_true')
 
